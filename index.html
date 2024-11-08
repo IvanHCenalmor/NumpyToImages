@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NumPy to PNG Converter</title>
+</head>
+<body>
+    <h1>NumPy to PNG Converter</h1>
+    <input type="file" id="fileInput" accept=".npy">
+    <button id="convertBtn" disabled>Convert to PNG</button>
+    <a id="downloadLink" style="display: none;">Download PNG</a>
+
+    <!-- Pyodide for running Python in the browser -->
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.21.3/full/pyodide.js"></script>
+    <script type="text/javascript">
+        async function main() {
+            // Initialize Pyodide
+            const pyodide = await loadPyodide();
+            await pyodide.loadPackage(['numpy', 'matplotlib']);
+
+            // Select DOM elements
+            const fileInput = document.getElementById("fileInput");
+            const convertBtn = document.getElementById("convertBtn");
+            const downloadLink = document.getElementById("downloadLink");
+
+            let npArray = null;
+
+            // Handle file input
+            fileInput.addEventListener("change", async (event) => {
+                const file = event.target.files[0];
+                if (file && file.name.endsWith(".npy")) {
+                    const arrayBuffer = await file.arrayBuffer();
+                    const npyBytes = new Uint8Array(arrayBuffer);
+
+                    // Pass .npy data to Python
+                    pyodide.globals.set("npy_bytes", npyBytes);
+                    npArray = pyodide.runPython(`
+                        import numpy as np
+                        import io
+
+                        # Load .npy file from bytes
+                        npy_data = np.frombuffer(npy_bytes, dtype=np.uint8)
+                        array = np.load(io.BytesIO(npy_data))
+                        array
+                    `);
+
+                    // Enable the convert button if array loaded successfully
+                    if (npArray) {
+                        convertBtn.disabled = false;
+                    }
+                } else {
+                    alert("Please upload a valid .npy file.");
+                }
+            });
+
+            // Handle conversion to PNG
+            convertBtn.addEventListener("click", async () => {
+                pyodide.globals.set("npArray", npArray);
+                pyodide.runPython(`
+                    import matplotlib.pyplot as plt
+                    from matplotlib.colors import Normalize
+                    import numpy as np
+                    import io
+
+                    # Normalize data and create image
+                    norm = Normalize(vmin=npArray.min(), vmax=npArray.max())
+                    plt.imshow(norm(npArray), cmap="gray")
+                    plt.axis("off")
+
+                    # Save plot to PNG in memory
+                    buf = io.BytesIO()
+                    plt.savefig(buf, format="png", bbox_inches="tight", pad_inches=0)
+                    buf.seek(0)
+                    image_bytes = buf.read()
+                `);
+
+                const imageBytes = pyodide.globals.get("image_bytes").toJs();
+                const blob = new Blob([imageBytes], { type: "image/png" });
+                const url = URL.createObjectURL(blob);
+
+                // Set up download link
+                downloadLink.href = url;
+                downloadLink.download = "output.png";
+                downloadLink.style.display = "block";
+                downloadLink.textContent = "Download PNG";
+
+                // Clean up plot
+                pyodide.runPython(`plt.close()`);
+            });
+        }
+
+        main();
+    </script>
+</body>
+</html>
